@@ -69,6 +69,10 @@ Change the order or the groups, then paste the plan back with `p`. A group witho
 
 This project is not affiliated with The Browser Company.
 
+## Support
+
+If this tool saves you time, you can [buy me a coffee on Venmo](https://venmo.com/u/JohnMangel).
+
 ## License
 
 [MIT](LICENSE)
