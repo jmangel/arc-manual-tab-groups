@@ -120,6 +120,12 @@ def tab_ids_of(entries):
     return [t for e in entries for t in ([e["tab"]] if "tab" in e else e["tabs"])]
 
 
+def normalize(entries):
+    """Ungrouped Today tabs must come before all groups: Arc treats a loose tab
+    placed after a group as part of that group. Stable within each kind."""
+    return [e for e in entries if "tab" in e] + [e for e in entries if "tab" not in e]
+
+
 # ───────────────────────── plan text format ─────────────────────────
 
 def export_text(space_name, space_id, entries, titles, n):
@@ -241,7 +247,7 @@ def apply_plan(sb, space, entries):
     cur = sb.today(space)
     cur_groups = {e["id"] for e in cur if "group" in e}
     cur_units = tab_ids_of(cur)
-    plan = copy.deepcopy(entries)
+    plan = normalize(copy.deepcopy(entries))
 
     planned = set(tab_ids_of(plan))
     gone = planned - set(cur_units)
@@ -393,9 +399,19 @@ class Editor:
                 k = ti + d
                 if 0 <= k < len(t):
                     t[ti], t[k] = t[k], t[ti]
+                    return
+                j = ei + d
+                if 0 <= j < len(E) and "group" in E[j]:
+                    t.pop(ti)                       # into the neighbouring group
+                    if d > 0:
+                        E[j]["tabs"].insert(0, tid)
+                    else:
+                        E[j]["tabs"].append(tid)
+                elif d < 0:
+                    t.pop(ti)                       # out of the first group:
+                    E.insert(ei, {"tab": tid})      # becomes the last ungrouped tab
                 else:
-                    t.pop(ti)
-                    E.insert(ei + 1 if d > 0 else ei, {"tab": tid})
+                    pass  # last tab of the last group moving down: nowhere to go
                 return
 
     # ui helpers
@@ -492,10 +508,14 @@ class Editor:
             self.status = f"Couldn't load {source}: {ex}"
             return
         self.snapshot()
-        self.entries = entries
+        fixed = normalize(entries)
+        moved = fixed != entries
+        self.entries = fixed
         self.marked.clear()
         self.status = f"Loaded plan from {source}." + (
-            f" {added} tab(s) it didn't mention were put at the top." if added else "")
+            f" {added} tab(s) it didn't mention were put at the top." if added else "") + (
+            " Ungrouped tabs below a group were moved up to the ungrouped section "
+            "(otherwise Arc would add them to the group above)." if moved else "")
 
     # main loop
     def run(self, scr):
@@ -505,12 +525,18 @@ class Editor:
             curses.use_default_colors()
         except curses.error:
             pass
+        self.focus = None
         while True:
+            self.entries = normalize(self.entries)
+            if self.focus is not None:
+                self.cur = (self.row_of_tab(self.focus) if isinstance(self.focus, str)
+                            else self.row_of_entry(self.focus))
             self.draw(scr)
             k = scr.get_wch()
             rows = self.rows()
             row = rows[self.cur] if rows else None
             self.status = ""
+            self.focus = None
             if k in (curses.KEY_UP, "k"):
                 self.cur -= 1
             elif k in (curses.KEY_DOWN, "j"):
@@ -529,8 +555,10 @@ class Editor:
                 if row[0] == "group":
                     ei, obj = row[1], self.entries[row[1]]
                     j = ei + d
-                    if 0 <= j < len(self.entries):
+                    if 0 <= j < len(self.entries) and "group" in self.entries[j]:
                         self.entries[ei], self.entries[j] = self.entries[j], self.entries[ei]
+                    elif d < 0:
+                        self.status = "Ungrouped tabs always stay above groups in Arc."
                     self.cur = self.row_of_entry(obj)
                 else:
                     tid = self.tab_at(row)
@@ -567,14 +595,14 @@ class Editor:
                 else:
                     groups[choice]["tabs"].extend(tids)
                 self.marked.clear()
-                self.cur = self.row_of_tab(tids[0])
+                self.focus = tids[0]
             elif k == "n":
                 name = self.prompt(scr, "New group name: ")
                 if name:
                     self.snapshot()
                     obj = {"group": name, "id": None, "tabs": []}
                     self.entries.insert(row[1] + 1 if row else 0, obj)
-                    self.cur = self.row_of_entry(obj)
+                    self.focus = obj
                     self.status = "Group created. Mark tabs (space) and press m to move them in."
             elif k == "r" and row and row[0] != "loose":
                 g = self.entries[row[1]]
@@ -586,7 +614,8 @@ class Editor:
                 self.snapshot()
                 g = self.entries[row[1]]
                 self.entries[row[1]:row[1] + 1] = [{"tab": t} for t in g["tabs"]]
-                self.status = f"Ungrouped '{g['group']}'."
+                self.focus = g["tabs"][0] if g["tabs"] else None
+                self.status = f"Ungrouped '{g['group']}'; its tabs moved to the ungrouped section."
             elif k == "u":
                 if self.undo_stack:
                     self.entries = self.undo_stack.pop()

@@ -28,7 +28,7 @@ On the first run, macOS can ask for permission for your terminal to control Arc.
 | Key | Action |
 | --- | --- |
 | `↑` `↓` / `j` `k` | Move the cursor |
-| `J` `K` | Move the tab or group up or down |
+| `J` `K` | Move the tab or group up or down (see below) |
 | `space` | Mark a tab |
 | `m` | Move the marked tabs (or the tab at the cursor) to a group |
 | `n` | New group |
@@ -39,6 +39,17 @@ On the first run, macOS can ask for permission for your terminal to control Arc.
 | `c` / `p` | Copy the plan to the clipboard / paste a plan from the clipboard |
 | `a` | Apply |
 | `q` | Quit |
+
+### Ungrouped tabs stay on top
+
+In Arc, ungrouped Today tabs must come before all groups. Arc would put an ungrouped tab that comes after a group into that group. Therefore the editor only allows ungrouped tabs at the top:
+
+- `J`/`K` on a grouped tab moves it within its group, then into the next or previous group.
+- Moving a tab up past the top of the first group makes it the last ungrouped tab.
+- Moving the last ungrouped tab down puts it at the top of the first group.
+- Groups move only among other groups.
+- `x` (ungroup) moves the group's tabs to the end of the ungrouped section.
+- If a pasted plan puts an ungrouped tab below a group, the script moves the tab up to the ungrouped section (so Arc does not add it to the group) and tells you.
 
 ### Plan format
 
