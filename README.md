@@ -19,6 +19,8 @@ python3 arc_tabs.py                 # pick a space, edit, apply
 python3 arc_tabs.py --space Work    # go directly to a space
 python3 arc_tabs.py --restore       # roll back to a backup
 python3 arc_tabs.py --no-verify     # skip the check after Arc reopens
+python3 arc_tabs.py --verify-seconds 60   # watch the file longer after applying
+python3 arc_tabs.py --no-restart    # experimental: apply without quitting Arc
 ```
 
 On the first run, macOS can ask for permission for your terminal to control Arc.
@@ -76,9 +78,20 @@ Change the order or the groups, then paste the plan back with `p`. A group witho
 - **Arc quits when you apply.** Uploads stop, and form text that you did not save is lost.
 - **The script changes a private Arc file.** `StorableSidebar.json` does not have a public format. An Arc update can break this script.
 - **Backups.** Before each change, the script writes a backup to `~/Library/Application Support/Arc/sidebar-backups/` and keeps the last 20. Use `--restore` to go back.
-- **Sync.** Arc sync can revert the changes. After Arc reopens, the script watches the file for 20 seconds and tells you if it changed.
+- **Sync.** Arc sync can revert the changes. After Arc reopens, the script watches the file for 20 seconds (`--verify-seconds` changes this) and shows any differences from what it wrote.
 
 This project is not affiliated with The Browser Company.
+
+### Testing live edits (`--no-restart`)
+
+The script normally quits Arc before it writes, because Arc keeps the sidebar in memory and seems to save it over the file. `--no-restart` writes while Arc is running so you can test that:
+
+1. Run `python3 arc_tabs.py --no-restart`, make a small, easy-to-see change (for example, rename a group), and apply it.
+2. Watch the sidebar. Does the change appear without a restart?
+3. The script watches the file. If Arc saves over it, the script shows what changed and how long it took.
+4. If the file was left alone, quit and reopen Arc anyway, and check that the change is still there. Arc may save its own copy when it quits.
+
+If the change is lost, run the script again without `--no-restart`.
 
 ## Support
 

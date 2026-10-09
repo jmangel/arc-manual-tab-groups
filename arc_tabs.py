@@ -20,7 +20,7 @@ Only Today (unpinned) is touched. Pinned tabs/folders and Favorites are not.
 Note: quitting Arc interrupts anything in progress in it (uploads, unsaved form
 text). The first run may ask your terminal for permission to control Arc.
 """
-import argparse, copy, curses, json, locale, os, re, shlex, shutil, subprocess
+import argparse, copy, curses, difflib, json, locale, os, re, shlex, shutil, subprocess
 import sys, tempfile, time, uuid
 from pathlib import Path
 
@@ -313,6 +313,37 @@ def structure(sb, space):
             for e in sb.today(space)]
 
 
+def outline(sb, space):
+    """Human-readable Today layout, one line per group or tab."""
+    lines = []
+    for e in sb.today(space):
+        if "tab" in e:
+            lines.append(f"• {label(sb.items[e['tab']], sb.items)}")
+        else:
+            lines.append(f"▾ {e['group']}")
+            lines += [f"    {label(sb.items[t], sb.items)}" for t in e["tabs"]]
+    return lines
+
+
+def report_mismatch(expected_lines, after_lines, why):
+    """Show how Arc's Today layout differs from what was written."""
+    diff = list(difflib.unified_diff(expected_lines, after_lines, "written", "now in Arc",
+                                     n=1, lineterm=""))[2:]  # drop file header lines
+    print("⚠ Arc's Today tabs no longer match what this script wrote.")
+    if not diff:
+        print("  (Same titles and order; only Arc's internal IDs changed.)")
+    else:
+        print("  Lines starting with - were written by this script; + is what Arc has now:\n")
+        for line in diff:
+            print("    " + ("…" if line.startswith("@@") else line))
+    print()
+    for line in why:
+        print("  " + line)
+    print("  - If the sidebar now looks wrong, restore the copy from just before applying:")
+    print("      python3 arc_tabs.py --restore")
+    print("    and choose the newest backup ending in -pre-apply.")
+
+
 # ───────────────────────── interactive editor ─────────────────────────
 
 HELP = [
@@ -323,7 +354,9 @@ MENU_KEYS = "123456789abcdefghijklmoprstuvwxyz"
 
 
 class Editor:
-    def __init__(self, entries, titles, n, space_name, space_id, group_ids, note=""):
+    def __init__(self, entries, titles, n, space_name, space_id, group_ids, note="",
+                 apply_msg="Apply? Arc will quit, update, and reopen."):
+        self.apply_msg = apply_msg
         self.entries = copy.deepcopy(entries)
         self.orig = json.dumps(entries)
         self.titles, self.n = titles, n
@@ -662,7 +695,7 @@ class Editor:
             elif k == "a":
                 if not self.dirty():
                     self.status = "No changes to apply."
-                elif self.confirm(scr, "Apply? Arc will quit, update, and reopen."):
+                elif self.confirm(scr, self.apply_msg):
                     return self.entries
             elif k == "q":
                 if not self.dirty() or self.confirm(scr, "Discard your changes?"):
@@ -706,7 +739,12 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--space", help="space name (case-insensitive)")
     ap.add_argument("--restore", action="store_true", help="restore a backup")
-    ap.add_argument("--no-verify", action="store_true", help="skip the post-reopen check")
+    ap.add_argument("--no-verify", action="store_true", help="skip the post-apply check")
+    ap.add_argument("--no-restart", action="store_true",
+                    help="EXPERIMENTAL: write while Arc is running, without quitting or "
+                         "reopening it, to test whether Arc picks up the change live")
+    ap.add_argument("--verify-seconds", type=int, default=VERIFY_SECONDS, metavar="N",
+                    help=f"how long the post-apply check watches the file (default {VERIFY_SECONDS})")
     args = ap.parse_args()
     locale.setlocale(locale.LC_ALL, "")
 
@@ -729,15 +767,24 @@ def main():
     note = (f"Backed up. Plan {'copied to clipboard' if copied else 'ready'}. "
             "Press p to paste a reorganized plan back.")
 
-    ed = Editor(entries, titles, n, sname, sid, group_ids, note)
+    if args.no_restart:
+        ed = Editor(entries, titles, n, sname, sid, group_ids, note,
+                    "Apply WITHOUT restarting Arc (experimental test)?")
+    else:
+        ed = Editor(entries, titles, n, sname, sid, group_ids, note)
     result = curses.wrapper(ed.run)
     if result is None:
         print(f"No changes applied. (Backup: {b.name})")
         return
 
-    print("Quitting Arc…")
-    if not quit_arc():
-        sys.exit("Arc didn't quit within 30s. Nothing was changed.")
+    if args.no_restart:
+        if not arc_running():
+            print("Note: Arc isn't running, so --no-restart has nothing to test. "
+                  "Writing anyway; open Arc to see the result.")
+    else:
+        print("Quitting Arc…")
+        if not quit_arc():
+            sys.exit("Arc didn't quit within 30s. Nothing was changed.")
     fresh = Sidebar()
     space2 = fresh.space(sid)
     if space2 is None:
@@ -746,27 +793,68 @@ def main():
     try:
         notes = apply_plan(fresh, space2, result)
     except RuntimeError as ex:
-        subprocess.run(["open", "-a", "Arc"])
-        sys.exit(f"{ex}\nNothing was changed; Arc reopened.")
+        if not args.no_restart:
+            subprocess.run(["open", "-a", "Arc"])
+        sys.exit(f"{ex}\nNothing was changed." + ("" if args.no_restart else " Arc reopened."))
     expected = structure(fresh, space2)
+    expected_lines = outline(fresh, space2)
     write_sidebar(fresh.data)
     for line in notes:
         print("  " + line)
     print(f"Applied. Backup: {pre}")
 
-    subprocess.run(["open", "-a", "Arc"])
-    print("Reopened Arc.")
+    if args.no_restart:
+        print("\nArc was NOT restarted. Watch the sidebar now: does it update on its own?")
+        why = ["Arc was running, so it most likely saved its own in-memory sidebar over",
+               "the file. That means live edits don't work and the restart is needed.",
+               "- To apply the change for real, run again without --no-restart."]
+        intro = (f"Watching Arc's file for {args.verify_seconds}s to see whether Arc "
+                 f"overwrites it. Ctrl+C stops watching.")
+    else:
+        subprocess.run(["open", "-a", "Arc"])
+        print("Reopened Arc.")
+        why = ["This can mean Arc synced an older sidebar from its servers, or that tabs",
+               "were opened, closed, or moved in Arc during the check.",
+               "- If the change was reverted, run this script again to reapply it."]
+        intro = (f"Checking that Arc keeps the changes. Arc sync can replace them with an "
+                 f"older\ncopy from its servers, so this watches the file for "
+                 f"{args.verify_seconds}s. Ctrl+C skips the check.")
     if args.no_verify:
         return
-    print(f"Watching {VERIFY_SECONDS}s for sync reverting the change…")
-    time.sleep(VERIFY_SECONDS)
-    after = Sidebar()
-    sp = after.space(sid)
-    if sp and structure(after, sp) == expected:
-        print("✓ Changes still in place. Check Arc to confirm.")
+
+    print(intro)
+    start = time.time()
+    try:
+        while True:
+            time.sleep(1)
+            elapsed = time.time() - start
+            try:
+                after = Sidebar()
+            except (json.JSONDecodeError, OSError):
+                continue  # caught Arc mid-write; try again next second
+            sp = after.space(sid)
+            if sp is None:
+                print(f"⚠ After {elapsed:.0f}s the space is no longer in Arc's file.\n"
+                      "  To undo: python3 arc_tabs.py --restore (choose the newest -pre-apply backup)")
+                return
+            if structure(after, sp) != expected:
+                print(f"After {elapsed:.0f}s:")
+                report_mismatch(expected_lines, outline(after, sp), why)
+                return
+            if elapsed >= args.verify_seconds:
+                break
+    except KeyboardInterrupt:
+        print("\nCheck stopped.")
+        return
+
+    if args.no_restart:
+        print(f"✓ Arc left the file alone for {args.verify_seconds}s. If the sidebar also "
+              "updated, live edits\n  may work. To be sure, quit and reopen Arc and check "
+              "the layout survives; Arc\n  may still save over it when it quits. If it doesn't "
+              "survive, rerun without --no-restart.")
     else:
-        print("⚠ Arc's file no longer matches what was written. Sync may have reverted it,\n"
-              "  or you changed tabs in the meantime. Check Arc. To undo: --restore")
+        print(f"✓ Arc still has the new layout after {args.verify_seconds}s. "
+              "Look at the sidebar to confirm.")
 
 
 if __name__ == "__main__":
