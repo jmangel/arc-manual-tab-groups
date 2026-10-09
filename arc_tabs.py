@@ -316,7 +316,7 @@ def structure(sb, space):
 # ───────────────────────── interactive editor ─────────────────────────
 
 HELP = [
-    "↑↓/jk move  J/K reorder  space mark  m move-to-group  n new group  r rename  x ungroup",
+    "↑↓/jk move  J/K reorder  space mark  m move-to-group  n new group  r rename  x ungroup tab/group",
     "u undo  e $EDITOR  p paste plan  c copy plan  a APPLY  q quit",
 ]
 MENU_KEYS = "123456789abcdefghijklmoprstuvwxyz"
@@ -610,12 +610,32 @@ class Editor:
                 if name:
                     self.snapshot()
                     g["group"] = name
-            elif k == "x" and row and row[0] != "loose":
+            elif k == "x" and row and row[0] == "group":
+                # On a group header: dissolve the whole group
                 self.snapshot()
                 g = self.entries[row[1]]
                 self.entries[row[1]:row[1] + 1] = [{"tab": t} for t in g["tabs"]]
                 self.focus = g["tabs"][0] if g["tabs"] else None
                 self.status = f"Ungrouped '{g['group']}'; its tabs moved to the ungrouped section."
+            elif k == "x" and row:
+                # On a tab: ungroup just the marked tabs, or the tab at the cursor
+                order = tab_ids_of(self.entries)
+                tids = [t for t in order if t in self.marked] or [self.tab_at(row)]
+                grouped = {t for e in self.entries if "group" in e for t in e["tabs"]}
+                tids = [t for t in tids if t in grouped]
+                if not tids:
+                    self.status = "Already ungrouped."
+                    continue
+                self.snapshot()
+                for t in tids:
+                    self.remove_tab(t)
+                # appended at the end; normalize() then places them after the
+                # existing ungrouped tabs, i.e. at the end of the ungrouped section
+                self.entries += [{"tab": t} for t in tids]
+                self.marked.clear()
+                self.focus = tids[0]
+                self.status = (f"Ungrouped {len(tids)} tab(s); moved to the end of the "
+                               "ungrouped section.")
             elif k == "u":
                 if self.undo_stack:
                     self.entries = self.undo_stack.pop()

@@ -33,7 +33,7 @@ On the first run, macOS can ask for permission for your terminal to control Arc.
 | `m` | Move the marked tabs (or the tab at the cursor) to a group |
 | `n` | New group |
 | `r` | Rename a group |
-| `x` | Ungroup |
+| `x` | Ungroup the tab (or the marked tabs); on a group header, ungroup the whole group |
 | `u` | Undo |
 | `e` | Edit the plan in `$VISUAL` / `$EDITOR` |
 | `c` / `p` | Copy the plan to the clipboard / paste a plan from the clipboard |
@@ -48,7 +48,7 @@ In Arc, ungrouped Today tabs must come before all groups. Arc would put an ungro
 - Moving a tab up past the top of the first group makes it the last ungrouped tab.
 - Moving the last ungrouped tab down puts it at the top of the first group.
 - Groups move only among other groups.
-- `x` (ungroup) moves the group's tabs to the end of the ungrouped section.
+- `x` on a tab moves that tab (or the marked tabs) to the end of the ungrouped section. `x` on a group header does the same with all of the group's tabs.
 - If a pasted plan puts an ungrouped tab below a group, the script moves the tab up to the ungrouped section (so Arc does not add it to the group) and tells you.
 
 ### Plan format
