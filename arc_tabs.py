@@ -5,6 +5,7 @@ arc_tabs.py: reorganize Arc's Today tabs from the terminal.
     python3 arc_tabs.py                 # pick a space, edit, apply
     python3 arc_tabs.py --space Work
     python3 arc_tabs.py --restore       # roll back to a backup
+    python3 arc_tabs.py --touch         # also mark all Today tabs active now
 
 Flow:
   1. Backs up StorableSidebar.json (kept in .../Arc/sidebar-backups, last 20).
@@ -32,6 +33,7 @@ APPLE_EPOCH = 978307200
 GROUP_KINDS = ("tabGroup", "list")   # Tidy sections are "tabGroup"; folders "list"
 TITLE_FIELDS = ("title", "name", "label")
 VERIFY_SECONDS = 20
+TOUCH_FIELD = "timeLastActiveAt"
 
 
 # ───────────────────────── Arc file helpers ─────────────────────────
@@ -308,6 +310,24 @@ def apply_plan(sb, space, entries):
     return notes
 
 
+def touch_tabs(sb, tab_ids):
+    """Set each tab's last-active time to now, so Arc's auto-archive timer
+    restarts. Arc stores it in Apple epoch seconds. Returns the count touched."""
+    now = time.time() - APPLE_EPOCH
+
+    def walk(d):
+        hit = False
+        for k, v in d.items():
+            if k == TOUCH_FIELD and isinstance(v, (int, float)):
+                d[k] = now
+                hit = True
+            elif isinstance(v, dict):
+                hit = walk(v) or hit
+        return hit
+
+    return sum(walk(sb.items[t]) for t in tab_ids if t in sb.items)
+
+
 def structure(sb, space):
     return [("g", e["group"], tuple(e["tabs"])) if "group" in e else ("t", e["tab"])
             for e in sb.today(space)]
@@ -323,7 +343,9 @@ MENU_KEYS = "123456789abcdefghijklmoprstuvwxyz"
 
 
 class Editor:
-    def __init__(self, entries, titles, n, space_name, space_id, group_ids, note=""):
+    def __init__(self, entries, titles, n, space_name, space_id, group_ids, note="",
+                 touch=False):
+        self.touch = touch
         self.entries = copy.deepcopy(entries)
         self.orig = json.dumps(entries)
         self.titles, self.n = titles, n
@@ -660,7 +682,7 @@ class Editor:
                 self.load_plan(Path(path).read_text(), "editor")
                 os.unlink(path)
             elif k == "a":
-                if not self.dirty():
+                if not self.dirty() and not self.touch:
                     self.status = "No changes to apply."
                 elif self.confirm(scr, "Apply? Arc will quit, update, and reopen."):
                     return self.entries
@@ -707,6 +729,8 @@ def main():
     ap.add_argument("--space", help="space name (case-insensitive)")
     ap.add_argument("--restore", action="store_true", help="restore a backup")
     ap.add_argument("--no-verify", action="store_true", help="skip the post-reopen check")
+    ap.add_argument("--touch", action="store_true",
+                    help="on apply, mark all Today tabs as active now (delays auto-archive)")
     args = ap.parse_args()
     locale.setlocale(locale.LC_ALL, "")
 
@@ -729,7 +753,7 @@ def main():
     note = (f"Backed up. Plan {'copied to clipboard' if copied else 'ready'}. "
             "Press p to paste a reorganized plan back.")
 
-    ed = Editor(entries, titles, n, sname, sid, group_ids, note)
+    ed = Editor(entries, titles, n, sname, sid, group_ids, note, touch=args.touch)
     result = curses.wrapper(ed.run)
     if result is None:
         print(f"No changes applied. (Backup: {b.name})")
@@ -748,6 +772,10 @@ def main():
     except RuntimeError as ex:
         subprocess.run(["open", "-a", "Arc"])
         sys.exit(f"{ex}\nNothing was changed; Arc reopened.")
+    if args.touch:
+        touched = touch_tabs(fresh, tab_ids_of(fresh.today(space2)))
+        notes.append(f"Marked {touched} tab(s) as active now." if touched else
+                     f"No {TOUCH_FIELD} found on any tab; nothing touched.")
     expected = structure(fresh, space2)
     write_sidebar(fresh.data)
     for line in notes:
