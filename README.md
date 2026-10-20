@@ -20,14 +20,14 @@ python3 arc_tabs.py --space Work    # go directly to a space
 python3 arc_tabs.py --restore       # roll back to a backup
 python3 arc_tabs.py --no-verify     # skip the check after Arc reopens
 python3 arc_tabs.py --touch         # also mark all Today tabs as active now
-python3 arc_tabs.py --touch-all     # mark Today tabs in all spaces as active now
+python3 arc_tabs.py --touch-all     # also mark Today tabs in all spaces as active now
 ```
 
 ### Delay auto-archive
 
 Arc archives a Today tab when the tab is not active for a set time. With `--touch`, the script sets the last-active time (`timeLastActiveAt`) of all Today tabs in the space to "now" when you apply. Arc then starts to count again from zero. With `--touch`, you can apply also when you did not change the tabs.
 
-With `--touch-all`, the script does not open the editor. It quits Arc, sets the last-active time of the Today tabs in all spaces to "now", and opens Arc again. It shows the number of tabs that it updated in each space, and the total.
+`--touch-all` is the same as `--touch`, but it also sets the time of the Today tabs in all other spaces. Edit the space as usual, then apply. The script shows the number of tabs that it updated in each space, and the total.
 
 This only delays the archive. Run the script again before the archive time ends. Arc sync can change the times back, and the check after Arc reopens does not examine them.
 

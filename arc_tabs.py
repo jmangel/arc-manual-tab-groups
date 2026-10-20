@@ -6,7 +6,7 @@ arc_tabs.py: reorganize Arc's Today tabs from the terminal.
     python3 arc_tabs.py --space Work
     python3 arc_tabs.py --restore       # roll back to a backup
     python3 arc_tabs.py --touch         # also mark all Today tabs active now
-    python3 arc_tabs.py --touch-all     # only that, for every space, no editor
+    python3 arc_tabs.py --touch-all     # the same, for the Today tabs of every space
 
 Flow:
   1. Backs up StorableSidebar.json (kept in .../Arc/sidebar-backups, last 20).
@@ -741,29 +741,19 @@ def do_restore():
     print(f"Restored {chosen.name} and reopened Arc.")
 
 
-def do_touch_all():
-    """Mark the Today tabs of every space as active now. No editor."""
-    if input("Arc will quit, update, and reopen. Continue? [y/N] ").strip().lower() != "y":
-        return print("Nothing was changed.")
-    print("Quitting Arc…")
-    if not quit_arc():
-        sys.exit("Arc didn't quit within 30s. Nothing was changed.")
-    pre = backup("pre-touch-all")
-    sb = Sidebar()
-    total = 0
-    for s in sb.spaces:
+def touch_spaces(sb, spaces):
+    """Touch the Today tabs of each space. Returns notes with the counts."""
+    notes, total = [], 0
+    for s in spaces:
         if sb.today_root(s) is None:
             continue
         n = touch_tabs(sb, today_tab_ids(sb, s))
         total += n
-        print(f"  {s.get('title') or '(untitled)'}: {n} tab(s)")
-    if total:
-        write_sidebar(sb.data)
-        print(f"Updated the active time of {total} tab(s). Backup: {pre}")
-    else:
-        print(f"No {TOUCH_FIELD} found on any tab; nothing was changed.")
-    subprocess.run(["open", "-a", "Arc"])
-    print("Reopened Arc.")
+        if len(spaces) > 1:
+            notes.append(f"  {s.get('title') or '(untitled)'}: {n} tab(s)")
+    notes.append(f"Updated the active time of {total} tab(s)." if total else
+                 f"No {TOUCH_FIELD} found on any tab; nothing touched.")
+    return notes
 
 
 def main():
@@ -774,7 +764,7 @@ def main():
     ap.add_argument("--touch", action="store_true",
                     help="on apply, mark all Today tabs as active now (delays auto-archive)")
     ap.add_argument("--touch-all", action="store_true",
-                    help="mark the Today tabs of every space as active now, without the editor")
+                    help="like --touch, but for the Today tabs of every space")
     args = ap.parse_args()
     locale.setlocale(locale.LC_ALL, "")
 
@@ -782,8 +772,6 @@ def main():
         return do_restore()
     if not SRC.exists():
         sys.exit(f"Not found: {SRC}")
-    if args.touch_all:
-        return do_touch_all()
 
     sb = Sidebar()
     space = pick_space(sb, args.space)
@@ -799,7 +787,8 @@ def main():
     note = (f"Backed up. Plan {'copied to clipboard' if copied else 'ready'}. "
             "Press p to paste a reorganized plan back.")
 
-    ed = Editor(entries, titles, n, sname, sid, group_ids, note, touch=args.touch)
+    ed = Editor(entries, titles, n, sname, sid, group_ids, note,
+                touch=args.touch or args.touch_all)
     result = curses.wrapper(ed.run)
     if result is None:
         print(f"No changes applied. (Backup: {b.name})")
@@ -818,10 +807,10 @@ def main():
     except RuntimeError as ex:
         subprocess.run(["open", "-a", "Arc"])
         sys.exit(f"{ex}\nNothing was changed; Arc reopened.")
-    if args.touch:
-        touched = touch_tabs(fresh, today_tab_ids(fresh, space2))
-        notes.append(f"Updated the active time of {touched} tab(s)." if touched else
-                     f"No {TOUCH_FIELD} found on any tab; nothing touched.")
+    if args.touch_all:
+        notes += touch_spaces(fresh, fresh.spaces)
+    elif args.touch:
+        notes += touch_spaces(fresh, [space2])
     expected = structure(fresh, space2)
     write_sidebar(fresh.data)
     for line in notes:
