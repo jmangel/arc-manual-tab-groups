@@ -311,6 +311,22 @@ def apply_plan(sb, space, entries):
     return notes
 
 
+def today_tab_ids(sb, space):
+    """Every tab under Today at any depth, including tabs inside split views
+    or other containers, which today() lists as one unit."""
+    out, stack, seen = [], list(reversed(kids(sb.today_root(space)))), set()
+    while stack:
+        cid = stack.pop()
+        it = sb.items.get(cid)
+        if not it or cid in seen:
+            continue
+        seen.add(cid)
+        if kind(it) == "tab":
+            out.append(cid)
+        stack += reversed(kids(it))
+    return out
+
+
 def touch_tabs(sb, tab_ids):
     """Set each tab's last-active time to now, so Arc's auto-archive timer
     restarts. Arc stores it in Apple epoch seconds. Returns the count touched."""
@@ -738,7 +754,7 @@ def do_touch_all():
     for s in sb.spaces:
         if sb.today_root(s) is None:
             continue
-        n = touch_tabs(sb, tab_ids_of(sb.today(s)))
+        n = touch_tabs(sb, today_tab_ids(sb, s))
         total += n
         print(f"  {s.get('title') or '(untitled)'}: {n} tab(s)")
     if total:
@@ -803,7 +819,7 @@ def main():
         subprocess.run(["open", "-a", "Arc"])
         sys.exit(f"{ex}\nNothing was changed; Arc reopened.")
     if args.touch:
-        touched = touch_tabs(fresh, tab_ids_of(fresh.today(space2)))
+        touched = touch_tabs(fresh, today_tab_ids(fresh, space2))
         notes.append(f"Updated the active time of {touched} tab(s)." if touched else
                      f"No {TOUCH_FIELD} found on any tab; nothing touched.")
     expected = structure(fresh, space2)
